@@ -1,0 +1,10 @@
+## Managed components — pulled from https://components.espressif.com
+##
+## In ESP-IDF v6.0+ the MQTT client (formerly the in-tree `mqtt`
+## component) was moved out of the core tree into the Component Registry.
+## Listing it here lets the Component Manager fetch it automatically on
+## the next build. The component still registers under the name `mqtt`,
+## so `PRIV_REQUIRES mqtt` in CMakeLists.txt continues to work.
+
+dependencies:
+  espressif/mqtt: "*"
