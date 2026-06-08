@@ -1,7 +1,7 @@
-# Custom partition table for ESP32-C6 with 8MB flash
-# Default IDF table only allocates 1 MB to the app, which the firmware
-# outgrew once we added TLS + the public CA bundle. Here we give the
-# factory app 3 MB - plenty of headroom for the foreseeable additions.
+# Custom partition table for ESP32-C6 with 8MB flash.
+# Der Reaktionstest selbst ist winzig; wir geben der Factory-App
+# trotzdem grosszuegige 3 MB, damit fuer spaetere Erweiterungen in
+# der Vorlesung reichlich Platz bleibt.
 #
 # Name,     Type, SubType, Offset,   Size,     Flags
 nvs,        data, nvs,     0x9000,   0x6000,

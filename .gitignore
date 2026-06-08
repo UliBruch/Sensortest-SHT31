@@ -82,14 +82,10 @@ Desktop.ini
 .pioenvs/
 .piolibdeps/
 
-# Server (Python) — SQLite DB lives next to app.py
-server/*.db
-server/*.db-journal
-
 # Claude Code per-developer state
 .claude/
 
-# Not part of this firmware repo: lecture slides and MQTT backend
+# Nicht Teil dieses Firmware-Repos: Vorlesungsfolien und separates Backend
 slides/
 server/
 

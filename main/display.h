@@ -2,9 +2,9 @@
  * @file display.h
  * @brief SSD1306-OLED-Anzeige für den Reaktionstest (passiver Treiber)
  *
- * Anders als im ursprünglichen Sensor-Demo ist dies kein eigener
- * FreeRTOS-Task mehr, sondern eine Sammlung von Zeichenfunktionen.
- * Der Reaktionstest-Task ruft sie auf, um die Zustände darzustellen.
+ * Dies ist kein eigener FreeRTOS-Task, sondern eine Sammlung von
+ * Zeichenfunktionen. Der Reaktionstest-Task ruft sie auf, um die
+ * einzelnen Zustände darzustellen.
  */
 
 #ifndef DISPLAY_H

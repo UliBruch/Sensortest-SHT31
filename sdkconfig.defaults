@@ -1,4 +1,4 @@
-# ESP-IDF Default Configuration for ESP32-C6 Sensor Project
+# ESP-IDF Default Configuration für den ESP32-C6 Reaktionstest
 
 # Build target (replaces `idf.py set-target esp32c6`)
 CONFIG_IDF_TARGET="esp32c6"
@@ -35,9 +35,3 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
 
-# Newlib - for float printf support
-CONFIG_NEWLIB_NANO_FORMAT=n
-
-# TLS / public CA bundle - required for HiveMQ Cloud (mqtts://)
-CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
-CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
