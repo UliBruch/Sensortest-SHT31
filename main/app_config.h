@@ -1,11 +1,12 @@
 /**
  * @file app_config.h
- * @brief Hardware-Konfiguration und Konstanten für den ESP32-C6 Reaktionstest
+ * @brief Hardware-Konfiguration und Konstanten für den ESP32-C6 SHT31-Sensortest
  *
  * Board: ESP32-C6-DevKitC-1
- *  - BOOT-Taster      : GPIO 9  (aktiv-low, interner Pull-up)
- *  - Onboard WS2812 LED: GPIO 8 (adressierbare RGB-LED)
- *  - SSD1306 OLED      : I2C, SDA = GPIO 5, SCL = GPIO 6, 128x32, Addr 0x3C
+ *  - SHT31 Temp/Feuchte: I2C, SDA = GPIO 5, SCL = GPIO 6, Addr 0x44
+ *  - SSD1306 OLED       : I2C, SDA = GPIO 5, SCL = GPIO 6, 128x32, Addr 0x3C
+ *
+ * SHT31 und Display teilen sich denselben I2C-Bus.
  */
 
 #ifndef APP_CONFIG_H
@@ -14,7 +15,7 @@
 #include "driver/gpio.h"
 
 // =============================================================================
-// I2C-Bus (OLED-Display)
+// I2C-Bus (gemeinsam für OLED-Display und SHT31-Sensor)
 // =============================================================================
 #define APP_I2C_PORT            I2C_NUM_0
 #define APP_I2C_SCL_PIN         GPIO_NUM_6
@@ -32,27 +33,28 @@
 #define DISPLAY_PAGES           (DISPLAY_HEIGHT / 8)  // 4 Pages bei 32px Höhe
 
 // =============================================================================
-// Taster und LED
+// SHT31-Sensor
 // =============================================================================
-#define BUTTON_GPIO             GPIO_NUM_9   // BOOT-Taster, aktiv-low
-#define BUTTON_DEBOUNCE_MS      50           // Mindestabstand zwischen zwei Events
+// Standard-Adresse 0x44 (ADDR-Pin auf GND). Bei ADDR-Pin auf VDD: 0x45.
+#define SHT31_I2C_ADDR          0x44
+// Single-Shot, High Repeatability, ohne Clock-Stretching (MSB/LSB).
+#define SHT31_CMD_MEAS_MSB      0x24
+#define SHT31_CMD_MEAS_LSB      0x00
+// Soft-Reset-Kommando.
+#define SHT31_CMD_RESET_MSB     0x30
+#define SHT31_CMD_RESET_LSB     0xA2
+// Messdauer bei High Repeatability laut Datenblatt max. 15 ms; mit Reserve.
+#define SHT31_MEAS_DELAY_MS     20
 
-#define LED_GPIO                GPIO_NUM_8   // Onboard WS2812 RGB-LED
-#define LED_BRIGHTNESS          40           // 0..255 pro Farbkanal (augenschonend)
-
 // =============================================================================
-// Reaktionstest-Timing
+// Sensor-Task-Timing
 // =============================================================================
-#define WAIT_MIN_MS             2000   // kürzeste Zufallswartezeit
-#define WAIT_MAX_MS             5000   // längste Zufallswartezeit
-#define REACTION_TIMEOUT_MS     2000   // Timeout, bis das System in Standby geht
-#define RESULT_DISPLAY_MS       3000   // Anzeigedauer des Ergebnisses
-#define TIMEOUT_DISPLAY_MS      2500   // Anzeigedauer der Timeout-Meldung
+#define SENSOR_INTERVAL_MS      1000   // Abstand zwischen zwei Messungen
 
 // =============================================================================
 // Task-Konfiguration
 // =============================================================================
-#define TASK_PRIORITY_REACTION  5
-#define TASK_STACK_REACTION     4096
+#define TASK_PRIORITY_SENSOR    5
+#define TASK_STACK_SENSOR       4096
 
 #endif // APP_CONFIG_H

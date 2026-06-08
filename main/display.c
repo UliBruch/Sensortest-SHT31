@@ -1,10 +1,10 @@
 /**
  * @file display.c
- * @brief SSD1306-OLED-Treiber für den Reaktionstest
+ * @brief SSD1306-OLED-Treiber für den SHT31-Sensortest
  *
  * Minimaler SSD1306-Treiber für 128x32-OLEDs über die ESP-IDF-I2C-API.
- * Enthält eine 5x7-Font, die für die Ergebnisanzeige um einen frei
- * wählbaren Faktor hochskaliert werden kann (jeder Pixel als NxN-Block).
+ * Enthält eine 5x7-Font, die um einen frei wählbaren Faktor hochskaliert
+ * werden kann (jeder Pixel als NxN-Block).
  */
 
 #include <string.h>
@@ -254,22 +254,6 @@ static int fb_string_width(const char *str, int scale)
     return (len - 1) * FONT_ADVANCE * scale + FONT_WIDTH * scale;
 }
 
-// Zeichnet einen String horizontal und vertikal zentriert.
-static void fb_draw_string_centered(const char *str, int scale)
-{
-    int w = fb_string_width(str, scale);
-    int h = FONT_HEIGHT * scale;
-    int x = (DISPLAY_WIDTH - w) / 2;
-    int y = (DISPLAY_HEIGHT - h) / 2;
-    if (x < 0) {
-        x = 0;
-    }
-    if (y < 0) {
-        y = 0;
-    }
-    fb_draw_string_scaled(x, y, str, scale);
-}
-
 static esp_err_t fb_update_display(void)
 {
     ssd1306_send_command(SSD1306_CMD_SET_COL_ADDR);
@@ -359,29 +343,30 @@ void display_show_message(const char *line1, const char *line2)
     fb_update_display();
 }
 
-void display_show_result(uint32_t millis)
+void display_show_climate(float temp_c, float hum_pct)
 {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%lu ms", (unsigned long)millis);
+    char line_t[16];
+    char line_h[16];
+    snprintf(line_t, sizeof(line_t), "%.1f C", temp_c);
+    snprintf(line_h, sizeof(line_h), "%.1f %%", hum_pct);
 
     fb_clear();
-    // So groß wie möglich: Skalierung 4 nutzen, wenn es passt, sonst 3.
-    int scale = 4;
-    if (fb_string_width(buf, scale) > DISPLAY_WIDTH ||
-        FONT_HEIGHT * scale > DISPLAY_HEIGHT) {
-        scale = 3;
-    }
-    fb_draw_string_centered(buf, scale);
-    fb_update_display();
-}
 
-void display_show_big_text(const char *text)
-{
-    fb_clear();
-    int scale = 3;
-    if (fb_string_width(text, scale) > DISPLAY_WIDTH) {
-        scale = 2;
+    // Zwei Zeilen in Skalierung 2 (je 14 px hoch): Temperatur oben, Feuchte
+    // unten. Jede Zeile horizontal zentrieren.
+    const int scale = 2;
+
+    int xt = (DISPLAY_WIDTH - fb_string_width(line_t, scale)) / 2;
+    if (xt < 0) {
+        xt = 0;
     }
-    fb_draw_string_centered(text, scale);
+    fb_draw_string_scaled(xt, 1, line_t, scale);
+
+    int xh = (DISPLAY_WIDTH - fb_string_width(line_h, scale)) / 2;
+    if (xh < 0) {
+        xh = 0;
+    }
+    fb_draw_string_scaled(xh, 17, line_h, scale);
+
     fb_update_display();
 }

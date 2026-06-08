@@ -1,4 +1,4 @@
-# ESP-IDF Default Configuration für den ESP32-C6 Reaktionstest
+# ESP-IDF Default Configuration für den ESP32-C6 SHT31-Sensortest
 
 # Build target (replaces `idf.py set-target esp32c6`)
 CONFIG_IDF_TARGET="esp32c6"

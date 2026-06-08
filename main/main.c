@@ -1,17 +1,15 @@
 /**
  * @file main.c
- * @brief ESP32-C6 Reaktionstest - Einstiegspunkt
+ * @brief ESP32-C6 SHT31-Sensortest - Einstiegspunkt
  *
  * Demonstriert:
- *  - GPIO-Interrupt für einen Taster (BOOT-Taster, aktiv-low)
- *  - Ansteuerung der adressierbaren Onboard-WS2812-LED
+ *  - I2C-Master mit zwei Geräten am selben Bus (Sensor + Display)
+ *  - Ansteuerung des SHT31-Temperatur-/Feuchtesensors inkl. CRC-Prüfung
  *  - SSD1306-OLED mit skalierbarer Schrift
- *  - eine kleine FreeRTOS-Task-State-Machine
- *  - präzise Zeitmessung mit esp_timer
+ *  - einen einfachen FreeRTOS-Task zur zyklischen Messung
  *
- * Funktion: Nach einem Tastendruck vergeht eine zufällige Wartezeit,
- * dann leuchtet die LED. Die Zeit bis zum nächsten Tastendruck wird
- * gemessen und groß auf dem Display ausgegeben.
+ * Funktion: Der SHT31 wird zyklisch ausgelesen; Temperatur und relative
+ * Feuchte werden ins Log und auf das OLED-Display ausgegeben.
  */
 
 #include "freertos/FreeRTOS.h"
@@ -22,14 +20,15 @@
 
 #include "app_config.h"
 #include "display.h"
-#include "reaction_task.h"
+#include "sht31.h"
+#include "sensor_task.h"
 
 static const char *TAG = "MAIN";
 
 static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 
 // =============================================================================
-// I2C-Bus initialisieren (nur noch für das OLED-Display nötig)
+// I2C-Bus initialisieren (gemeinsam für SHT31-Sensor und OLED-Display)
 // =============================================================================
 static esp_err_t i2c_bus_init(void)
 {
@@ -61,31 +60,40 @@ static esp_err_t i2c_bus_init(void)
 void app_main(void)
 {
     ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "ESP32-C6 Reaktionstest");
+    ESP_LOGI(TAG, "ESP32-C6 SHT31-Sensortest");
     ESP_LOGI(TAG, "========================================");
 
-    // I2C-Bus für das Display aufsetzen
+    // I2C-Bus für Sensor und Display aufsetzen
     esp_err_t ret = i2c_bus_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2C-Init fehlgeschlagen, Abbruch");
         return;
     }
 
-    // Display initialisieren (muss vor dem Reaktionstest-Task geschehen,
-    // da der Task direkt auf die Display-Funktionen zugreift)
+    // Display initialisieren (muss vor dem Sensor-Task geschehen, da der
+    // Task direkt auf die Display-Funktionen zugreift)
     ret = display_init(s_i2c_bus_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Display-Init fehlgeschlagen, Abbruch");
         return;
     }
+    display_show_message("SHT31", "START");
 
-    // Reaktionstest starten (richtet Taster und LED ein, startet den Task)
-    ret = reaction_task_start();
+    // SHT31-Sensor am selben I2C-Bus initialisieren
+    ret = sht31_init(s_i2c_bus_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Reaktionstest konnte nicht gestartet werden");
+        ESP_LOGE(TAG, "SHT31-Init fehlgeschlagen, Abbruch");
+        display_show_message("SHT31", "NICHT DA");
         return;
     }
 
-    ESP_LOGI(TAG, "Initialisierung abgeschlossen, Reaktionstest läuft");
-    // Ab hier übernimmt der Reaktionstest-Task.
+    // Sensor-Task starten (liest zyklisch und aktualisiert das Display)
+    ret = sensor_task_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Sensor-Task konnte nicht gestartet werden");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Initialisierung abgeschlossen, Sensor-Task läuft");
+    // Ab hier übernimmt der Sensor-Task.
 }

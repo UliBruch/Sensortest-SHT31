@@ -1,8 +1,0 @@
-## Managed Components — bezogen von https://components.espressif.com
-##
-## led_strip steuert die adressierbare Onboard-WS2812-RGB-LED des
-## ESP32-C6-DevKitC-1 über das RMT-Peripheral an. Der Component Manager
-## lädt die Abhängigkeit beim nächsten Build automatisch herunter.
-
-dependencies:
-  espressif/led_strip: "^3.0.0"

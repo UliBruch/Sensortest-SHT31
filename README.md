@@ -1,76 +1,74 @@
-# ESP32-C6 Reaktionstest
+# ESP32-C6 SHT31-Sensortest
 
-Ein kleines, vollständig offline laufendes Demoprojekt für die
-Vorlesung: Es misst die menschliche Reaktionszeit und zeigt sie groß
-auf einem OLED-Display an.
+Ein kleines, vollständig offline laufendes Demoprojekt: Ein per I2C
+angeschlossener **SHT31** (Sensirion Temperatur-/Feuchtesensor) wird
+zyklisch ausgelesen, und **Temperatur sowie relative Feuchte** werden auf
+einem **SSD1306-OLED** angezeigt.
 
 ## Funktion
 
-Nach einem Tastendruck vergeht eine **zufällige Wartezeit** von 2–5
-Sekunden. Danach leuchtet die **LED grün** auf, und ab diesem Moment
-läuft eine Zeitmessung. Sobald der Taster erneut gedrückt wird, stoppt
-die Messung, und die vergangene Zeit erscheint in Millisekunden in
-großer Schrift auf dem Display.
+Der Sensor wird im Single-Shot-Modus betrieben: Etwa einmal pro Sekunde
+sendet die Firmware einen Messbefehl, wartet die Messzeit ab und liest das
+Ergebnis inklusive Prüfsumme aus. Die Werte erscheinen sowohl im seriellen
+Log als auch in zwei Zeilen auf dem Display, zum Beispiel:
 
-Zwei Sonderfälle werden abgefangen:
+```
+23.4 C
+45.2 %
+```
 
-- Wird schon **während der Wartezeit** (vor dem LED-Signal) gedrückt,
-  gilt das als Fehlstart und das Display zeigt **`ZU FRUEH`**.
-- Erfolgt nach dem LED-Signal **innerhalb von 2 Sekunden kein**
-  Tastendruck, läuft die Messung in einen Timeout und das Display
-  zeigt **`ZU SPAET`**. Anschließend geht das System wieder in
-  Standby.
+Schlägt eine Messung fehl (I2C-Fehler oder CRC stimmt nicht), zeigt das
+Display `SHT31 / FEHLER` und der Task läuft beim nächsten Intervall normal
+weiter.
 
 ## Hardware
 
 Board: **ESP32-C6-DevKitC-1** (8 MB Flash)
 
+SHT31-Sensor und OLED-Display teilen sich denselben I2C-Bus:
+
 | Funktion        | Pin     | Hinweis                                      |
 |-----------------|---------|----------------------------------------------|
-| Taster          | GPIO 9  | BOOT-Taster, aktiv-low, interner Pull-up     |
-| Status-LED      | GPIO 8  | Onboard-WS2812 (adressierbare RGB-LED)       |
-| OLED SDA        | GPIO 5  | I2C, SSD1306 128×32, Adresse 0x3C            |
-| OLED SCL        | GPIO 6  | I2C, 100 kHz                                  |
+| I2C SDA         | GPIO 5  | gemeinsam: SHT31 + SSD1306                    |
+| I2C SCL         | GPIO 6  | 100 kHz (Standard Mode)                      |
+| SHT31           | Addr 0x44 | ADDR-Pin auf GND (0x45 bei ADDR auf VDD)   |
+| SSD1306 OLED    | Addr 0x3C | 128×32                                     |
 
-Es ist keine zusätzliche Verkabelung nötig – Taster und LED sind
-bereits auf dem DevKit vorhanden.
+Verdrahtung des SHT31-Breakouts: `VCC → 3V3`, `GND → GND`, `SDA → GPIO 5`,
+`SCL → GPIO 6`. Die meisten Breakouts bringen eigene Pull-up-Widerstände
+mit; zusätzlich sind die internen Pull-ups des ESP32-C6 aktiviert.
 
-## Zustandsautomat
+## Messprinzip SHT31
 
-Der Reaktionstest läuft als FreeRTOS-Task mit folgenden Zuständen
-(siehe `main/reaction_task.c`):
+Verwendet wird die Single-Shot-Messung mit High Repeatability **ohne
+Clock-Stretching** (Befehl `0x24 0x00`):
 
-```
-IDLE  ──Taste──▶  WAITING ──Zufallszeit──▶ REACTING ──Taste──▶ RESULT ──▶ IDLE
-                     │ Taste                  │ Timeout 2 s
-                     ▼                        ▼
-                  "ZU FRUEH"               "ZU SPAET"
-```
+1. Den 2-Byte-Messbefehl senden.
+2. Die Messzeit abwarten (laut Datenblatt max. 15 ms, hier 20 ms mit Reserve).
+3. 6 Bytes lesen: `[T_MSB, T_LSB, T_CRC, RH_MSB, RH_LSB, RH_CRC]`.
+4. Beide CRC-8-Prüfsummen kontrollieren (Polynom `0x31`, Init `0xFF`) und die
+   Rohwerte umrechnen:
+   - `T[°C] = -45 + 175 · S_T / 65535`
+   - `RH[%] = 100 · S_RH / 65535`
 
 ## Projektstruktur
 
-| Datei                     | Aufgabe                                            |
-|---------------------------|----------------------------------------------------|
-| `main/main.c`             | Einstiegspunkt: I2C → Display → Reaktionstest      |
-| `main/app_config.h`       | Pins, Timings und Task-Parameter (zentral)         |
-| `main/reaction_task.c/.h` | State Machine, Taster-Interrupt, LED, Zeitmessung  |
-| `main/display.c/.h`       | SSD1306-Treiber mit skalierbarer Schrift           |
-
-Die Zeitmessung nutzt `esp_timer_get_time()` (Mikrosekunden, Ausgabe
-in Millisekunden), der Taster wird per GPIO-Interrupt mit Entprellung
-ausgewertet, und die WS2812-LED wird über das `led_strip`-Component
-angesteuert.
+| Datei                   | Aufgabe                                            |
+|-------------------------|----------------------------------------------------|
+| `main/main.c`           | Einstiegspunkt: I2C → Display → Sensor → Task      |
+| `main/app_config.h`     | Pins, Adressen, Timings (zentral)                  |
+| `main/sht31.c/.h`       | SHT31-Treiber inkl. CRC-Prüfung und Umrechnung     |
+| `main/sensor_task.c/.h` | FreeRTOS-Task: zyklisch messen, loggen, anzeigen   |
+| `main/display.c/.h`     | SSD1306-Treiber mit skalierbarer Schrift           |
 
 ## Konfiguration
 
-Alle wesentlichen Parameter stehen in `main/app_config.h` und lassen
-sich dort anpassen, u. a.:
+Alle wesentlichen Parameter stehen in `main/app_config.h`, u. a.:
 
-- `WAIT_MIN_MS` / `WAIT_MAX_MS` – Bereich der Zufallswartezeit
-- `REACTION_TIMEOUT_MS` – Timeout in der Mess-Phase (Standard 2000 ms)
-- `RESULT_DISPLAY_MS` – Anzeigedauer des Ergebnisses
-- `LED_BRIGHTNESS` – Helligkeit der LED (0–255 pro Kanal)
-- `BUTTON_DEBOUNCE_MS` – Entprellzeit des Tasters
+- `SHT31_I2C_ADDR` – Sensoradresse (`0x44` Standard, `0x45` bei ADDR=VDD)
+- `SENSOR_INTERVAL_MS` – Abstand zwischen zwei Messungen (Standard 1000 ms)
+- `APP_I2C_SDA_PIN` / `APP_I2C_SCL_PIN` – I2C-Pins
+- `APP_I2C_FREQ_HZ` – I2C-Taktfrequenz (Standard 100 kHz)
 
 ## Bauen und Flashen
 
@@ -81,5 +79,4 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Unter Windows ist der Port z. B. `COM5`. Das `led_strip`-Component
-wird beim ersten Build automatisch vom Component Manager geladen.
+Unter Windows ist der Port z. B. `COM5`.
