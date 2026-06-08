@@ -1,5 +1,5 @@
 # Custom partition table for ESP32-C6 with 8MB flash.
-# Der Reaktionstest selbst ist winzig; wir geben der Factory-App
+# Der Sensortest selbst ist winzig; wir geben der Factory-App
 # trotzdem grosszuegige 3 MB, damit fuer spaetere Erweiterungen in
 # der Vorlesung reichlich Platz bleibt.
 #
