@@ -207,20 +207,19 @@ static inline void fb_set_pixel(int x, int y)
     s_framebuffer[page * DISPLAY_WIDTH + x] |= (1 << bit);
 }
 
-/**
- * Zeichnet ein Zeichen mit Skalierungsfaktor: Jeder gesetzte Font-Pixel
- * wird als (scale x scale)-Block gezeichnet. scale == 1 ergibt die
- * Originalgröße 5x7.
- */
-static void fb_draw_char_scaled(int x, int y, char c, int scale)
-{
-    if (c < 32 || c > 127) {
-        c = '?';
-    }
-    int idx = c - 32;
+// Grad-Zeichen (°): kleiner Ring im oberen Bereich der Zellenhöhe. Spalten-
+// orientiert wie die Font (Bit n = Zeile n). Nicht in ASCII 32-127 enthalten,
+// daher als eigenes Glyph geführt.
+static const uint8_t font_degree[FONT_WIDTH] = {0x00, 0x07, 0x05, 0x07, 0x00};
 
+/**
+ * Zeichnet ein 5x7-Glyph mit Skalierungsfaktor: Jeder gesetzte Pixel wird als
+ * (scale x scale)-Block gezeichnet. scale == 1 ergibt die Originalgröße 5x7.
+ */
+static void fb_draw_glyph(int x, int y, const uint8_t *glyph, int scale)
+{
     for (int col = 0; col < FONT_WIDTH; col++) {
-        uint8_t glyph_col = font5x7[idx][col];
+        uint8_t glyph_col = glyph[col];
         for (int row = 0; row < FONT_HEIGHT; row++) {
             if (glyph_col & (1 << row)) {
                 // Pixel als scale x scale Block setzen
@@ -232,6 +231,14 @@ static void fb_draw_char_scaled(int x, int y, char c, int scale)
             }
         }
     }
+}
+
+static void fb_draw_char_scaled(int x, int y, char c, int scale)
+{
+    if (c < 32 || c > 127) {
+        c = '?';
+    }
+    fb_draw_glyph(x, y, font5x7[c - 32], scale);
 }
 
 static void fb_draw_string_scaled(int x, int y, const char *str, int scale)
@@ -345,23 +352,31 @@ void display_show_message(const char *line1, const char *line2)
 
 void display_show_climate(float temp_c, float hum_pct)
 {
-    char line_t[16];
+    char num_t[12];
     char line_h[16];
-    snprintf(line_t, sizeof(line_t), "%.1f C", temp_c);
-    snprintf(line_h, sizeof(line_h), "%.1f %%", hum_pct);
+    snprintf(num_t, sizeof(num_t), "%.1f", temp_c);        // z.B. "24.7"
+    snprintf(line_h, sizeof(line_h), "%.1f rH%%", hum_pct); // z.B. "45.2 rH%"
 
     fb_clear();
 
     // Zwei Zeilen in Skalierung 2 (je 14 px hoch): Temperatur oben, Feuchte
     // unten. Jede Zeile horizontal zentrieren.
     const int scale = 2;
+    const int advance = FONT_ADVANCE * scale;
 
-    int xt = (DISPLAY_WIDTH - fb_string_width(line_t, scale)) / 2;
+    // Temperaturzeile als "<zahl>°C": Zahl, dann Grad-Glyph, dann 'C'. Das
+    // Grad-Zeichen belegt eine reguläre Zeichenbreite (advance).
+    int n = (int)strlen(num_t);
+    int w_t = n * advance + advance + FONT_WIDTH * scale; // Zahl + ° + 'C'
+    int xt = (DISPLAY_WIDTH - w_t) / 2;
     if (xt < 0) {
         xt = 0;
     }
-    fb_draw_string_scaled(xt, 1, line_t, scale);
+    fb_draw_string_scaled(xt, 1, num_t, scale);
+    fb_draw_glyph(xt + n * advance, 1, font_degree, scale);
+    fb_draw_char_scaled(xt + (n + 1) * advance, 1, 'C', scale);
 
+    // Feuchtezeile "<zahl> rH%" (alle Zeichen in der Font enthalten).
     int xh = (DISPLAY_WIDTH - fb_string_width(line_h, scale)) / 2;
     if (xh < 0) {
         xh = 0;

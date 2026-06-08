@@ -13,8 +13,8 @@ Ergebnis inklusive Prüfsumme aus. Die Werte erscheinen sowohl im seriellen
 Log als auch in zwei Zeilen auf dem Display, zum Beispiel:
 
 ```
-23.4 C
-45.2 %
+24.7°C
+45.2 rH%
 ```
 
 Schlägt eine Messung fehl (I2C-Fehler oder CRC stimmt nicht), zeigt das

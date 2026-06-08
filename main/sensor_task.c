@@ -34,7 +34,7 @@ static void sensor_task(void *pvParameters)
 
         esp_err_t ret = sht31_read(&temp_c, &hum_pct);
         if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "T = %.2f C, RH = %.2f %%", temp_c, hum_pct);
+            ESP_LOGI(TAG, "T = %.2f °C, RH = %.2f rH%%", temp_c, hum_pct);
             display_show_climate(temp_c, hum_pct);
         } else {
             ESP_LOGE(TAG, "Messung fehlgeschlagen: %s", esp_err_to_name(ret));
