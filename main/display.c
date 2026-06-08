@@ -1,26 +1,25 @@
 /**
- * @file display_task.c
- * @brief SSD1306 OLED display driver and FreeRTOS task implementation
+ * @file display.c
+ * @brief SSD1306-OLED-Treiber für den Reaktionstest
  *
- * Minimal SSD1306 driver for 128x32 OLED displays using ESP-IDF I2C API.
+ * Minimaler SSD1306-Treiber für 128x32-OLEDs über die ESP-IDF-I2C-API.
+ * Enthält eine 5x7-Font, die für die Ergebnisanzeige um einen frei
+ * wählbaren Faktor hochskaliert werden kann (jeder Pixel als NxN-Block).
  */
 
 #include <string.h>
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include <stdlib.h>
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 
-#include "display_task.h"
+#include "display.h"
 #include "app_config.h"
-#include "sensor_common.h"
-#include "wifi_manager.h"
 
 static const char *TAG = "DISPLAY";
 
 // =============================================================================
-// SSD1306 Commands
+// SSD1306-Kommandos
 // =============================================================================
 #define SSD1306_CMD_DISPLAY_OFF         0xAE
 #define SSD1306_CMD_DISPLAY_ON          0xAF
@@ -43,8 +42,13 @@ static const char *TAG = "DISPLAY";
 #define SSD1306_CONTROL_CMD_STREAM      0x00
 #define SSD1306_CONTROL_DATA            0x40
 
+// Geometrie der Font: 5 Spalten breit, 7 Zeilen hoch, +1 Spalte Abstand
+#define FONT_WIDTH      5
+#define FONT_HEIGHT     7
+#define FONT_ADVANCE    6   // FONT_WIDTH + 1 Pixel Abstand
+
 // =============================================================================
-// Simple 5x7 Font (ASCII 32-127)
+// Einfache 5x7-Font (ASCII 32-127)
 // =============================================================================
 static const uint8_t font5x7[][5] = {
     {0x00, 0x00, 0x00, 0x00, 0x00}, // Space
@@ -142,17 +146,17 @@ static const uint8_t font5x7[][5] = {
     {0x00, 0x00, 0x7F, 0x00, 0x00}, // |
     {0x00, 0x41, 0x36, 0x08, 0x00}, // }
     {0x08, 0x08, 0x2A, 0x1C, 0x08}, // ~
-    {0x08, 0x1C, 0x2A, 0x08, 0x08}, // DEL (arrow right)
+    {0x08, 0x1C, 0x2A, 0x08, 0x08}, // DEL (Pfeil rechts)
 };
 
 // =============================================================================
-// Module State
+// Modul-Zustand
 // =============================================================================
 static i2c_master_dev_handle_t s_dev_handle = NULL;
 static uint8_t s_framebuffer[DISPLAY_WIDTH * DISPLAY_PAGES];
 
 // =============================================================================
-// SSD1306 Low-Level Functions
+// SSD1306-Low-Level
 // =============================================================================
 static esp_err_t ssd1306_send_command(uint8_t cmd)
 {
@@ -171,7 +175,6 @@ static esp_err_t ssd1306_send_commands(const uint8_t *cmds, size_t len)
 
 static esp_err_t ssd1306_send_data(const uint8_t *data, size_t len)
 {
-    // Buffer for control byte + data
     uint8_t *buf = malloc(len + 1);
     if (!buf) {
         return ESP_ERR_NO_MEM;
@@ -187,116 +190,88 @@ static esp_err_t ssd1306_send_data(const uint8_t *data, size_t len)
 }
 
 // =============================================================================
-// Display Initialization
-// =============================================================================
-static esp_err_t ssd1306_init(i2c_master_bus_handle_t bus_handle)
-{
-    esp_err_t ret;
-
-    // Add device to I2C bus
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = SSD1306_I2C_ADDR,
-        .scl_speed_hz = APP_I2C_FREQ_HZ,
-    };
-
-    ret = i2c_master_bus_add_device(bus_handle, &dev_cfg, &s_dev_handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add device: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Initialization sequence for 128x32 display
-    const uint8_t init_cmds[] = {
-        SSD1306_CMD_DISPLAY_OFF,
-        SSD1306_CMD_SET_CLK_DIV, 0x80,          // Clock divide ratio
-        SSD1306_CMD_SET_MUX_RATIO, 0x1F,        // Multiplex ratio (32-1)
-        SSD1306_CMD_SET_DISPLAY_OFFSET, 0x00,   // Display offset
-        SSD1306_CMD_SET_START_LINE | 0x00,      // Start line 0
-        SSD1306_CMD_SET_CHARGE_PUMP, 0x14,      // Enable charge pump
-        SSD1306_CMD_SET_MEMORY_MODE, 0x00,      // Horizontal addressing mode
-        SSD1306_CMD_SET_SEG_REMAP,              // Segment remap
-        SSD1306_CMD_SET_COM_SCAN_DEC,           // COM scan direction
-        SSD1306_CMD_SET_COM_PINS, 0x02,         // COM pins config for 128x32
-        SSD1306_CMD_SET_CONTRAST, 0x8F,         // Contrast
-        SSD1306_CMD_ENTIRE_DISPLAY_RAM,         // Display from RAM
-        SSD1306_CMD_SET_NORMAL_DISPLAY,         // Normal display (not inverted)
-        SSD1306_CMD_DISPLAY_ON
-    };
-
-    ret = ssd1306_send_commands(init_cmds, sizeof(init_cmds));
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Display init failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Clear framebuffer and display
-    memset(s_framebuffer, 0, sizeof(s_framebuffer));
-
-    // Set column and page address
-    ssd1306_send_command(SSD1306_CMD_SET_COL_ADDR);
-    ssd1306_send_command(0);    // Start column
-    ssd1306_send_command(127);  // End column
-    ssd1306_send_command(SSD1306_CMD_SET_PAGE_ADDR);
-    ssd1306_send_command(0);    // Start page
-    ssd1306_send_command(3);    // End page (4 pages for 32px height)
-
-    // Clear display
-    ssd1306_send_data(s_framebuffer, sizeof(s_framebuffer));
-
-    ESP_LOGI(TAG, "SSD1306 128x32 initialized");
-
-    return ESP_OK;
-}
-
-// =============================================================================
-// Framebuffer Drawing Functions
+// Framebuffer-Zeichnen
 // =============================================================================
 static void fb_clear(void)
 {
     memset(s_framebuffer, 0, sizeof(s_framebuffer));
 }
 
-static void fb_draw_char(int x, int y, char c)
+static inline void fb_set_pixel(int x, int y)
+{
+    if (x < 0 || x >= DISPLAY_WIDTH || y < 0 || y >= DISPLAY_HEIGHT) {
+        return;
+    }
+    int page = y / 8;
+    int bit = y % 8;
+    s_framebuffer[page * DISPLAY_WIDTH + x] |= (1 << bit);
+}
+
+/**
+ * Zeichnet ein Zeichen mit Skalierungsfaktor: Jeder gesetzte Font-Pixel
+ * wird als (scale x scale)-Block gezeichnet. scale == 1 ergibt die
+ * Originalgröße 5x7.
+ */
+static void fb_draw_char_scaled(int x, int y, char c, int scale)
 {
     if (c < 32 || c > 127) {
         c = '?';
     }
-
     int idx = c - 32;
 
-    for (int col = 0; col < 5; col++) {
-        int px = x + col;
-        if (px >= DISPLAY_WIDTH) break;
-
+    for (int col = 0; col < FONT_WIDTH; col++) {
         uint8_t glyph_col = font5x7[idx][col];
-
-        for (int row = 0; row < 7; row++) {
-            int py = y + row;
-            if (py >= DISPLAY_HEIGHT) break;
-
+        for (int row = 0; row < FONT_HEIGHT; row++) {
             if (glyph_col & (1 << row)) {
-                // Set pixel
-                int page = py / 8;
-                int bit = py % 8;
-                s_framebuffer[page * DISPLAY_WIDTH + px] |= (1 << bit);
+                // Pixel als scale x scale Block setzen
+                for (int dx = 0; dx < scale; dx++) {
+                    for (int dy = 0; dy < scale; dy++) {
+                        fb_set_pixel(x + col * scale + dx, y + row * scale + dy);
+                    }
+                }
             }
         }
     }
 }
 
-static void fb_draw_string(int x, int y, const char *str)
+static void fb_draw_string_scaled(int x, int y, const char *str, int scale)
 {
     while (*str) {
-        fb_draw_char(x, y, *str);
-        x += 6;  // 5 pixel width + 1 pixel spacing
+        fb_draw_char_scaled(x, y, *str, scale);
+        x += FONT_ADVANCE * scale;
         str++;
     }
 }
 
+// Pixelbreite eines Strings bei gegebenem Skalierungsfaktor.
+static int fb_string_width(const char *str, int scale)
+{
+    int len = (int)strlen(str);
+    if (len == 0) {
+        return 0;
+    }
+    // n Zeichen belegen (n-1) volle Advances + die Breite des letzten Glyphs.
+    return (len - 1) * FONT_ADVANCE * scale + FONT_WIDTH * scale;
+}
+
+// Zeichnet einen String horizontal und vertikal zentriert.
+static void fb_draw_string_centered(const char *str, int scale)
+{
+    int w = fb_string_width(str, scale);
+    int h = FONT_HEIGHT * scale;
+    int x = (DISPLAY_WIDTH - w) / 2;
+    int y = (DISPLAY_HEIGHT - h) / 2;
+    if (x < 0) {
+        x = 0;
+    }
+    if (y < 0) {
+        y = 0;
+    }
+    fb_draw_string_scaled(x, y, str, scale);
+}
+
 static esp_err_t fb_update_display(void)
 {
-    // Set address range
     ssd1306_send_command(SSD1306_CMD_SET_COL_ADDR);
     ssd1306_send_command(0);
     ssd1306_send_command(127);
@@ -308,98 +283,105 @@ static esp_err_t fb_update_display(void)
 }
 
 // =============================================================================
-// FreeRTOS Task
+// Öffentliche API
 // =============================================================================
-static void display_task(void *pvParameters)
+esp_err_t display_init(i2c_master_bus_handle_t bus_handle)
 {
-    char line[22];  // Max 21 chars at 6px width for 128px display
-    sensor_state_t local;
+    esp_err_t ret;
 
-    ESP_LOGI(TAG, "Display Task started");
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = SSD1306_I2C_ADDR,
+        .scl_speed_hz = APP_I2C_FREQ_HZ,
+    };
 
-    // Splash screen - shown on boot and on every reset
-    fb_clear();
-    fb_draw_string(0,  0, "ESP32-C6 Sensors");
-    fb_draw_string(0,  8, "----------------");
-    fb_draw_string(0, 16, "Booting...");
-    fb_draw_string(0, 24, "BME280 SHT31 OLED");
-    fb_update_display();
-    vTaskDelay(pdMS_TO_TICKS(3000));
-
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(DISPLAY_UPDATE_INTERVAL_MS));
-
-        // Copy sensor state with mutex protection
-        xSemaphoreTake(g_sensor_mutex, portMAX_DELAY);
-        local = g_sensor_state;
-        xSemaphoreGive(g_sensor_mutex);
-
-        // Clear framebuffer
-        fb_clear();
-
-        // Line 0: BME temperature and pressure
-        if (local.bme_valid) {
-            snprintf(line, sizeof(line), "BME:%.1fC %.0fhPa",
-                     local.bme_temperature, local.bme_pressure);
-        } else {
-            snprintf(line, sizeof(line), "BME: --");
-        }
-        fb_draw_string(0, 0, line);
-
-        // Line 1: BME humidity (if available)
-        if (local.bme_valid && local.bme_is_bme280 && local.bme_humidity >= 0) {
-            snprintf(line, sizeof(line), "    Hum:%.0f%%", local.bme_humidity);
-        } else if (local.bme_valid) {
-            snprintf(line, sizeof(line), "    (no hum)");
-        } else {
-            line[0] = '\0';
-        }
-        fb_draw_string(0, 8, line);
-
-        // Line 2: SHT31 temperature and humidity
-        if (local.sht_valid) {
-            snprintf(line, sizeof(line), "SHT:%.1fC %.0f%%",
-                     local.sht_temperature, local.sht_humidity);
-        } else {
-            snprintf(line, sizeof(line), "SHT: --");
-        }
-        fb_draw_string(0, 16, line);
-
-        // Line 3: WiFi IP address
-        char ip[16];
-        wifi_manager_get_ip(ip, sizeof(ip));
-        snprintf(line, sizeof(line), "IP:%s", ip);
-        fb_draw_string(0, 24, line);
-
-        // Update display
-        fb_update_display();
-    }
-}
-
-// =============================================================================
-// Public API
-// =============================================================================
-esp_err_t display_task_start(i2c_master_bus_handle_t i2c_bus_handle)
-{
-    esp_err_t ret = ssd1306_init(i2c_bus_handle);
+    ret = i2c_master_bus_add_device(bus_handle, &dev_cfg, &s_dev_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Display initialization failed");
+        ESP_LOGE(TAG, "Gerät konnte nicht zum I2C-Bus hinzugefügt werden: %s",
+                 esp_err_to_name(ret));
         return ret;
     }
 
-    BaseType_t xReturned = xTaskCreate(
-        display_task,
-        "display_task",
-        TASK_STACK_DISPLAY,
-        NULL,
-        TASK_PRIORITY_DISPLAY,
-        NULL
-    );
+    // Initialisierungssequenz für 128x32-Display
+    const uint8_t init_cmds[] = {
+        SSD1306_CMD_DISPLAY_OFF,
+        SSD1306_CMD_SET_CLK_DIV, 0x80,
+        SSD1306_CMD_SET_MUX_RATIO, 0x1F,        // Multiplex-Ratio (32-1)
+        SSD1306_CMD_SET_DISPLAY_OFFSET, 0x00,
+        SSD1306_CMD_SET_START_LINE | 0x00,
+        SSD1306_CMD_SET_CHARGE_PUMP, 0x14,      // Charge Pump an
+        SSD1306_CMD_SET_MEMORY_MODE, 0x00,      // horizontaler Adressmodus
+        SSD1306_CMD_SET_SEG_REMAP,
+        SSD1306_CMD_SET_COM_SCAN_DEC,
+        SSD1306_CMD_SET_COM_PINS, 0x02,         // COM-Pins für 128x32
+        SSD1306_CMD_SET_CONTRAST, 0x8F,
+        SSD1306_CMD_ENTIRE_DISPLAY_RAM,
+        SSD1306_CMD_SET_NORMAL_DISPLAY,
+        SSD1306_CMD_DISPLAY_ON
+    };
 
-    if (xReturned != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create task");
-        return ESP_FAIL;
+    ret = ssd1306_send_commands(init_cmds, sizeof(init_cmds));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Display-Init fehlgeschlagen: %s", esp_err_to_name(ret));
+        return ret;
     }
 
+    fb_clear();
+    ret = fb_update_display();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Display konnte nicht gelöscht werden: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "SSD1306 128x32 initialisiert");
     return ESP_OK;
+}
+
+void display_show_message(const char *line1, const char *line2)
+{
+    fb_clear();
+    if (line1) {
+        // obere Zeile zentrieren, kleine Schrift
+        int x = (DISPLAY_WIDTH - fb_string_width(line1, 1)) / 2;
+        if (x < 0) {
+            x = 0;
+        }
+        fb_draw_string_scaled(x, 2, line1, 1);
+    }
+    if (line2) {
+        // untere Zeile zentrieren, etwas größer für die Aufforderung
+        int x = (DISPLAY_WIDTH - fb_string_width(line2, 2)) / 2;
+        if (x < 0) {
+            x = 0;
+        }
+        fb_draw_string_scaled(x, 14, line2, 2);
+    }
+    fb_update_display();
+}
+
+void display_show_result(uint32_t millis)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%lu ms", (unsigned long)millis);
+
+    fb_clear();
+    // So groß wie möglich: Skalierung 4 nutzen, wenn es passt, sonst 3.
+    int scale = 4;
+    if (fb_string_width(buf, scale) > DISPLAY_WIDTH ||
+        FONT_HEIGHT * scale > DISPLAY_HEIGHT) {
+        scale = 3;
+    }
+    fb_draw_string_centered(buf, scale);
+    fb_update_display();
+}
+
+void display_show_big_text(const char *text)
+{
+    fb_clear();
+    int scale = 3;
+    if (fb_string_width(text, scale) > DISPLAY_WIDTH) {
+        scale = 2;
+    }
+    fb_draw_string_centered(text, scale);
+    fb_update_display();
 }
